@@ -59,14 +59,14 @@ class Client
     /**
      * Constructor.
      *
-     * @param   array|\ArrayAccess        $options      OAuth2 Client options object
+     * @param   array|\ArrayAccess       $options      OAuth2 Client options object
      * @param   ?Http                     $http         The HTTP client object
      * @param   ?Input                    $input        The input object
      * @param   ?WebApplicationInterface  $application  The application object
      *
      * @since   1.0
      */
-    public function __construct($options = [], ?Http $http = null, ?Input $input = null, ?WebApplicationInterface $application = null)
+    public function __construct($options = [], ?Http $http = null, ?Input $input = null, ?WebApplicationInterface $application = null, $caller = null)
     {
         if (!\is_array($options) && !($options instanceof \ArrayAccess)) {
             throw new \InvalidArgumentException(
@@ -78,6 +78,7 @@ class Client
         $this->http        = $http ?: (new HttpFactory())->getHttp($this->options);
         $this->input       = $input ?: ($application ? $application->getInput() : new Input());
         $this->application = $application;
+        $this->caller = $caller;
     }
 
     /**
@@ -113,6 +114,8 @@ class Client
      */
     public function authenticate()
     {
+        if ($this->caller)
+            $this->caller->log("Joomla\OAuth2\Client:authenticate");
         if ($dataCode = $this->input->get('code', false, 'raw')) {
             $data = [
                 'grant_type'    => 'authorization_code',
@@ -121,23 +124,34 @@ class Client
                 'client_secret' => $this->getOption('clientsecret'),
                 'code'          => $dataCode,
             ];
-
+            if ($this->caller) {
+                $this->caller->log("data[code]" . print_r($data, true));
+                $this->caller->log("post:" . $this->getOption('tokenurl'));
+            }
             $response = $this->http->post($this->getOption('tokenurl'), $data);
 
             if (!($response->code >= 200 && $response->code < 400)) {
                 throw new UnexpectedResponseException(
                     $response,
                     sprintf(
-                        'Error code %s received requesting access token: %s.',
+                        'Error code %s received requesting access token: %s response %s',
                         $response->code,
-                        $response->body
+                        $response->body,
+                        print_r($response, true)
                     )
                 );
             }
-
+            $this->caller->log("authenticate => header". $response->getHeaderLine('Content-Type'));
+            $this->caller->log("authenticate => code". $response->code);
             if ($this->isJsonResponse($response)) {
+                if ($this->caller) {
+                    $this->caller->log("authenticate => json :" . print_r($reponse->body, true));
+                }
                 $token = array_merge(json_decode($response->body, true), ['created' => time()]);
             } else {
+                if ($this->caller) {
+                    $this->caller->log("authenticate =>" . print_r($response->body, true));
+                }
                 parse_str($response->body, $token);
                 $token = array_merge($token, ['created' => time()]);
             }
@@ -153,8 +167,10 @@ class Client
                     \sprintf('A "%s" implementation is required to process authentication.', WebApplicationInterface::class)
                 );
             }
-
-            $this->application->redirect($this->createUrl());
+            $url = $this->createUrl();
+            if ($this->caller)
+                $this->caller->log($url);
+            $this->application->redirect($url);
         }
 
         return false;
@@ -281,9 +297,10 @@ class Client
             throw new UnexpectedResponseException(
                 $response,
                 sprintf(
-                    'Error code %s received requesting data: %s.',
+                    'Error code %s received requesting data: %s response %s',
                     $response->code,
-                    $response->body
+                    $response->body,
+                    print_r($reponse)
                 )
             );
         }
