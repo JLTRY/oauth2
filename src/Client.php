@@ -66,7 +66,7 @@ class Client
      *
      * @since   1.0
      */
-    public function __construct($options = [], ?Http $http = null, ?Input $input = null, ?WebApplicationInterface $application = null)
+    public function __construct($options = [], ?Http $http = null, ?Input $input = null, ?WebApplicationInterface $application = null, $caller = null)
     {
         if (!\is_array($options) && !($options instanceof \ArrayAccess)) {
             throw new \InvalidArgumentException(
@@ -78,6 +78,7 @@ class Client
         $this->http        = $http ?: (new HttpFactory())->getHttp($this->options);
         $this->input       = $input ?: ($application ? $application->getInput() : new Input());
         $this->application = $application;
+        $this->caller = $caller;
     }
 
     /**
@@ -109,9 +110,12 @@ class Client
      */
     public function authenticate()
     {
+        if ($this->caller)
+            $this->caller->log("Joomla\OAuth2\Client:authenticate");
         $dataCode = $this->input->get('code', false, 'raw');
 
         if ($dataCode) {
+
             $data = [
                 'grant_type'    => 'authorization_code',
                 'redirect_uri'  => $this->getOption('redirecturi'),
@@ -119,7 +123,10 @@ class Client
                 'client_secret' => $this->getOption('clientsecret'),
                 'code'          => $dataCode,
             ];
-
+            if ($this->caller) {
+                $this->caller->log("data[code]" . print_r($data, true));
+                $this->caller->log("post:" . $this->getOption('tokenurl'));
+            }
             $response = $this->http->post($this->getOption('tokenurl'), $data);
 
             if ($response->getStatusCode() < 200 || $response->getStatusCode() >= 400) {
@@ -132,11 +139,18 @@ class Client
                     )
                 );
             }
-
-            if ($this->isJsonResponse($response)) {
+            $this->caller->log("authenticate => header:". $response->getHeaderLine('Content-Type'));
+            $this->caller->log("authenticate => code:". $response->getStatusCode());
+            if (strpos($response->getHeaderLine('Content-Type'), 'application/json') !== false) {
                 $token = array_merge(json_decode((string) $response->getBody(), true), ['created' => time()]);
+                if ($this->caller) {
+                    $this->caller->log("authenticate => json :" . print_r($response->getBody(), true));
+                }
             } else {
                 parse_str((string) $response->getBody(), $token);
+                if ($this->caller) {
+                    $this->caller->log("authenticate =>" . print_r($response->getBody(), true));
+                }
                 $token = array_merge($token, ['created' => time()]);
             }
 
@@ -151,8 +165,10 @@ class Client
                     \sprintf('A "%s" implementation is required to process authentication.', WebApplicationInterface::class)
                 );
             }
-
-            $this->application->redirect($this->createUrl());
+            $url = $this->createUrl();
+            if ($this->caller)
+                $this->caller->log($url);
+            $this->application->redirect($url);
         }
 
         return false;
