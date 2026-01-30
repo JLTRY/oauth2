@@ -89,7 +89,7 @@ class Client
      * @return  boolean
      *
      */
-    private function isJsonResponse(Response $response)
+    protected function isJsonResponse(Response $response)
     {
         foreach ($response->getHeader('Content-Type') as $type) {
             if (str_starts_with($type, 'application/json')) {
@@ -141,7 +141,7 @@ class Client
             }
             $this->caller->log("authenticate => header:". $response->getHeaderLine('Content-Type'));
             $this->caller->log("authenticate => code:". $response->getStatusCode());
-            if (strpos($response->getHeaderLine('Content-Type'), 'application/json') !== false) {
+            if ($this->isJsonResponse($response)) {
                 $token = array_merge(json_decode((string) $response->getBody(), true), ['created' => time()]);
                 if ($this->caller) {
                     $this->caller->log("authenticate => json :" . print_r($response->getBody(), true));
@@ -260,13 +260,22 @@ class Client
     public function query($url, $data = null, $headers = [], $method = 'get', $timeout = null)
     {
         $token = $this->getToken();
-
+        if ($this->caller) {
+            $this->caller->log("token" . print_r($token, true));
+        }
         if (array_key_exists('expires_in', $token) && $token['created'] + $token['expires_in'] < time() + 20) {
             if (!$this->getOption('userefresh')) {
+                if ($this->caller) {
+                    $this->caller->log("query => false");
+                }
                 return false;
             }
-
             $token = $this->refreshToken($token['refresh_token']);
+            if ($this->caller) {
+                $this->caller->log("query refresh_token:time" . time());
+                $this->caller->log("query refresh_token:<" . ($token['created'] + $token['expires_in']));
+                $this->caller->log("query refresh_token:" . print_r($token, 1));
+            }
         }
 
         $url = new Uri($url);
@@ -276,7 +285,9 @@ class Client
         } elseif ($this->getOption('authmethod') == 'get') {
             $url->setVar($this->getOption('getparam', 'access_token'), $token['access_token']);
         }
-
+        $this->caller->log("headers" . print_r($headers, true));
+        $this->caller->log("method:" . $method);
+        $this->caller->log("url:" . $url);
         switch ($method) {
             case 'head':
             case 'get':
@@ -423,7 +434,8 @@ class Client
             );
         }
 
-        if (in_array('application/json', $response->getHeader('Content-Type'))) {
+        //if (in_array('application/json', $response->getHeader('Content-Type'))) {
+        if ($this->isJsonResponse($response)) {
             $token = array_merge(json_decode((string) $response->getBody(), true), ['created' => time()]);
         } else {
             parse_str((string) $response->getBody(), $token);
